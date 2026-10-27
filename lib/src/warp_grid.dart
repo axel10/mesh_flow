@@ -13,36 +13,69 @@ class TerrainPreset {
   final List<double> r;
 }
 
-/// QueMusic 海选出的 5 组地形预设池，每次切歌随机抽取一组（避免连续重复）。
+/// 扩展精选的 9 组地形预设池，涵盖峭壁、光棱、峡谷、地平线与深海等不同风格，每次切歌随机抽取一组（避免连续重复）。
 const List<TerrainPreset> kTerrainPresets = [
+  // #0: 柔和斜波流（Soft Diagonal Wave）
   TerrainPreset(
     p: [4.67, 2.70, 4.24, 1.59],
     r: [
       -0.62, 0.70, -0.12, 0.41, 0.49, -0.48, 0.41, 0.75, -0.55, -0.91, -0.37, 0.87,
     ],
   ),
+  // #1: 光棱锐折（Prism Edge）- 右下方锐利明亮折角
   TerrainPreset(
     p: [5.36, 5.68, 5.32, 2.82],
     r: [
       -0.70, 0.39, -0.09, -0.81, 0.72, 0.61, 0.98, -0.53, 0.16, 0.67, 0.87, 0.01,
     ],
   ),
+  // #2: 纵向峭壁（Vertical Ridge）- 垂直大悬崖，层次立体
   TerrainPreset(
     p: [1.47, 0.65, 2.70, 5.10],
     r: [
       0.65, 0.65, 0.98, 0.72, 0.92, 0.20, -0.15, 0.82, -0.49, -0.58, -0.87, -0.68,
     ],
   ),
+  // #3: 舒缓洋流（Gentle Current）- 广阔平坦大波澜
   TerrainPreset(
     p: [6.21, 3.60, 0.28, 3.30],
     r: [
       -0.96, 0.24, -0.69, 0.37, 0.20, 0.32, 0.48, -0.82, 0.30, 0.40, 0.49, -0.43,
     ],
   ),
+  // #4: 裂隙断层（Chasm Fault）- 中央下沉深邃断崖
   TerrainPreset(
     p: [0.59, 1.55, 1.01, 0.91],
     r: [
       -0.27, 0.78, -0.70, 0.47, -0.26, -0.61, -0.68, 0.49, -0.41, -0.18, -0.82, -0.79,
+    ],
+  ),
+  // #5: 对角光棱（Diagonal Prism）- 拥有如 #1 般凌厉清晰的对角刀锋折光边缘
+  TerrainPreset(
+    p: [2.40, 1.80, 5.00, 2.10],
+    r: [
+      -0.50, 0.25, -0.10, 0.0, 0.0, 0.55, 0.85, -0.40, 0.25, 0.85, 0.90, -0.30,
+    ],
+  ),
+  // #6: 弧月断崖（Crescent Ridge）- 拥有如 #2 般立体鲜明的月弧悬崖断层分界线
+  TerrainPreset(
+    p: [4.80, 0.50, 2.20, 4.50],
+    r: [
+      0.60, 0.20, 0.70, 0.0, 0.0, -0.40, -0.20, 0.75, 0.80, -0.40, -0.92, 0.70,
+    ],
+  ),
+  // #7: 双峰峡谷（Twin Peaks Canyon）- 左右双峰夹峙，中央通光走廊
+  TerrainPreset(
+    p: [4.10, 2.30, 3.80, 1.20],
+    r: [
+      0.17, 0.38, -0.30, 0.0, 0.0, -0.21, 0.47, 0.38, 0.38, -0.47, -0.55, 0.47,
+    ],
+  ),
+  // #8: 深海极境（Deep Calm）- 极简安宁的大曲率微澜
+  TerrainPreset(
+    p: [0.00, 1.00, 2.00, 3.00],
+    r: [
+      0.45, 0.15, -0.20, 0.0, 0.0, 0.35, 0.20, -0.15, 0.25, -0.20, 0.30, 0.20,
     ],
   ),
 ];
@@ -56,13 +89,14 @@ double _fastTanh(double x) {
 
 /// 扭曲网格几何生成器。
 ///
-/// 采用 28×28 单元格（29×29 = 841 个顶点，1568 个三角形）。
+/// 采用 48×48 单元格（49×49 = 2401 个顶点，4608 个三角形）。
+/// 高细分网格能在悬崖（cliff）强对比边缘处提供平滑连续的曲面采样，彻底消除粗网格三角形引起的边缘阶梯走样与锯齿。
 /// 利用正弦模态 sin(nπu)sin(mπv) 在四边天然为零的特性，确保网格无论怎样变形四边都不会露空拉胶。
 class WarpGrid {
-  static const int kCells = 28;
-  static const int kVerts = kCells + 1; // 29
-  static const int vertexCount = kVerts * kVerts; // 841
-  static const int triangleIndexCount = kCells * kCells * 6; // 4704
+  static const int kCells = 48;
+  static const int kVerts = kCells + 1; // 49
+  static const int vertexCount = kVerts * kVerts; // 2401
+  static const int triangleIndexCount = kCells * kCells * 6; // 13824
 
   static final Uint16List _staticIndices = _buildIndices();
 
@@ -189,7 +223,8 @@ class WarpGrid {
   }
 
   /// 站波幅值的时间调制系数：幅值按 `1 ± kPulse` 缓慢呼吸，产生持续的流变感。
-  static const double kAmplitudePulse = 0.26;
+  /// 设置为 0.20，兼顾丰富的有机流动感与网格几何拓扑的平滑防折叠。
+  static const double kAmplitudePulse = 0.20;
 
   /// 时间调制的角频率（乘以由 `speed` 缩放后的时间）。
   static const double kPulseRate = 2.0;
