@@ -4,7 +4,7 @@ import 'dart:ui' as ui;
 
 /// 地形预设参数，控制网格悬崖与驻波模态形态。
 class TerrainPreset {
-  const TerrainPreset({required this.p, required this.r});
+  const TerrainPreset({required this.p, required this.r, this.hardEdge = false});
 
   /// 悬崖位置相位（4个浮点数），分别对应 r[8]、r[9]、r[10]、r[11] 的折痕位置
   final List<double> p;
@@ -24,9 +24,21 @@ class TerrainPreset {
   /// 还需要 `r[1]`、`r[2]` 这类 2π 高频模态把 `1 + ∂dx/∂u` 压到接近 0，
   /// 两者相乘才会出现刀锋般的硬边（参考 #1/#2/#4）。
   final List<double> r;
+
+  /// 是否为「硬边」地形。
+  ///
+  /// 为 true 时贴图雅可比在折痕处被压到接近 0，画面上会出现刀锋般清晰的颜色分界线；
+  /// 为 false 时只有平缓的山坡起伏，颜色过渡柔和、没有可见边界。
+  ///
+  /// 该标记不参与几何计算，仅用于对外描述地形风格，并由单元测试守住
+  /// 「硬边 : 柔和 = 1 : 1」的预设池配比。
+  final bool hardEdge;
 }
 
-/// 扩展精选的 9 组地形预设池，涵盖峭壁、光棱、峡谷、地平线与深海等不同风格，每次切歌随机抽取一组（避免连续重复）。
+/// 精选的 14 组地形预设池，涵盖峭壁、光棱、峡谷、地平线与深海等不同风格，每次切歌随机抽取一组（避免连续重复）。
+///
+/// 池子刻意维持「硬边 : 柔和 = 1 : 1」的配比：7 组带刀锋般的颜色分界线（[TerrainPreset.hardEdge]），
+/// 另外 7 组只有平缓山坡。随机切歌时硬边与柔和各有五成机会，既保留冲击力，又不会每首歌都「裂」一次。
 const List<TerrainPreset> kTerrainPresets = [
   // #0: 柔和斜波流（Soft Diagonal Wave）
   TerrainPreset(
@@ -41,6 +53,7 @@ const List<TerrainPreset> kTerrainPresets = [
     r: [
       -0.70, 0.39, -0.09, -0.81, 0.72, 0.61, 0.98, -0.53, 0.16, 0.67, 0.87, 0.01,
     ],
+    hardEdge: true,
   ),
   // #2: 纵向峭壁（Vertical Ridge）- 垂直大悬崖，层次立体
   TerrainPreset(
@@ -48,6 +61,7 @@ const List<TerrainPreset> kTerrainPresets = [
     r: [
       0.65, 0.65, 0.98, 0.72, 0.92, 0.20, -0.15, 0.82, -0.49, -0.58, -0.87, -0.68,
     ],
+    hardEdge: true,
   ),
   // #3: 舒缓洋流（Gentle Current）- 广阔平坦大波澜
   TerrainPreset(
@@ -62,6 +76,7 @@ const List<TerrainPreset> kTerrainPresets = [
     r: [
       -0.27, 0.78, -0.70, 0.47, -0.26, -0.61, -0.68, 0.49, -0.41, -0.18, -0.82, -0.79,
     ],
+    hardEdge: true,
   ),
   // #5: 对角光棱（Diagonal Prism）- 对角刀锋折光边缘，贴图在折痕处被压成一条硬边
   TerrainPreset(
@@ -69,6 +84,7 @@ const List<TerrainPreset> kTerrainPresets = [
     r: [
       -0.50, 0.55, 0.95, 0.0, 0.0, 0.55, 0.85, -0.40, 0.25, 0.85, 0.90, -0.30,
     ],
+    hardEdge: true,
   ),
   // #6: 弧月断崖（Crescent Ridge）- 立体鲜明的月弧悬崖断层分界线
   TerrainPreset(
@@ -76,6 +92,7 @@ const List<TerrainPreset> kTerrainPresets = [
     r: [
       0.60, 0.95, 0.70, 0.0, 0.0, -0.40, -0.20, 0.75, 0.80, -0.40, -0.92, 0.70,
     ],
+    hardEdge: true,
   ),
   // #7: 双峰峡谷（Twin Peaks Canyon）- 左右双峰夹峙，中央通光走廊
   TerrainPreset(
@@ -89,6 +106,43 @@ const List<TerrainPreset> kTerrainPresets = [
     p: [0.00, 1.00, 2.00, 3.00],
     r: [
       0.45, 0.15, -0.20, 0.0, 0.0, 0.35, 0.20, -0.15, 0.25, -0.20, 0.30, 0.20,
+    ],
+  ),
+  // #9: 水平光断（Horizon Rift）- 横向刀锋折光，画面被一条水平亮带截成上下两层
+  TerrainPreset(
+    p: [1.48, 1.28, 5.86, 3.33],
+    r: [
+      -0.79, -0.17, 0.11, 0.0, 0.0, 0.50, 0.72, -0.28, 0.49, -0.38, -0.68, 0.02,
+    ],
+    hardEdge: true,
+  ),
+  // #10: 侧棱裂崖（Side Blade）- 右侧纵向折棱把色彩压成一条陡立光刃
+  TerrainPreset(
+    p: [0.39, 0.86, 6.12, 4.08],
+    r: [
+      0.81, 0.38, -0.77, 0.0, 0.0, -0.77, -0.77, 0.03, 0.36, -0.98, 0.19, -0.66,
+    ],
+    hardEdge: true,
+  ),
+  // #11: 潮汐横涌（Tidal Swell）- 横向长波缓缓推涌，颜色过渡柔软
+  TerrainPreset(
+    p: [2.90, 4.10, 1.60, 5.20],
+    r: [
+      0.30, 0.0, 0.10, 0.0, 0.0, 0.45, 0.95, 0.18, 0.45, -0.20, 0.35, 0.15,
+    ],
+  ),
+  // #12: 对角缓流（Diagonal Drift）- 斜向大缓坡，色带平缓推移
+  TerrainPreset(
+    p: [5.40, 1.10, 3.30, 2.60],
+    r: [
+      0.78, 0.32, 0.0, 0.0, 0.0, 0.68, 0.0, 0.30, 0.50, 0.50, 0.35, -0.30,
+    ],
+  ),
+  // #13: 穹顶微澜（Dome Ripple）- 中央缓隆、四周微澜
+  TerrainPreset(
+    p: [0.90, 3.20, 5.80, 4.30],
+    r: [
+      0.85, 0.0, 0.0, 0.0, 0.0, -0.70, 0.0, 0.0, 0.40, -0.25, 0.35, 0.22,
     ],
   ),
 ];
@@ -108,9 +162,9 @@ double _fastTanh(double x) {
 /// 利用正弦模态 sin(nπu)sin(mπv) 在四边天然为零的特性，确保网格无论怎样变形四边都不会露空拉胶。
 class WarpGrid {
   static const int kCells = 96;
-  static const int kVerts = kCells + 1; // 49
-  static const int vertexCount = kVerts * kVerts; // 2401
-  static const int triangleIndexCount = kCells * kCells * 6; // 13824
+  static const int kVerts = kCells + 1; // 97
+  static const int vertexCount = kVerts * kVerts; // 9409
+  static const int triangleIndexCount = kCells * kCells * 6; // 55296
 
   static final Uint16List _staticIndices = _buildIndices();
 

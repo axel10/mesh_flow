@@ -54,7 +54,7 @@ class MeshFlow extends StatefulWidget {
   /// 调色盘主色列表（在无封面或图片解码前用作平滑渐变背景）。
   final List<Color>? palette;
 
-  /// 指定地形预设索引（0 ~ 4）。若为 null，则在切歌时随机选取不重复的预设。
+  /// 指定地形预设索引（0 ~ [kTerrainPresets].length - 1）。若为 null，则在切歌时随机选取不重复的预设。
   final int? presetIndex;
 
   /// 流动速度倍率。

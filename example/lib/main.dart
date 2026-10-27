@@ -253,7 +253,10 @@ class _PlayerPageState extends State<PlayerPage> {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _buildChip(
-            label: _selectedPreset == null ? '地形: 随机' : '地形: #$_selectedPreset',
+            label: _selectedPreset == null
+                ? '地形: 随机'
+                : '地形: #$_selectedPreset '
+                    '${kTerrainPresets[_selectedPreset!].hardEdge ? "硬边" : "柔和"}',
             icon: Icons.terrain_rounded,
             onTap: () {
               setState(() {

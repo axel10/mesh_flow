@@ -163,6 +163,22 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   });
 
+  test('地形预设池保持「硬边 : 柔和 = 1 : 1」的配比', () {
+    final int hardCount = kTerrainPresets.where((p) => p.hardEdge).length;
+    final int softCount = kTerrainPresets.length - hardCount;
+
+    expect(
+      hardCount,
+      softCount,
+      reason: '硬边 $hardCount 组 / 柔和 $softCount 组，随机切歌会偏向某一种风格',
+    );
+
+    for (final preset in kTerrainPresets) {
+      expect(preset.p.length, 4);
+      expect(preset.r.length, 12);
+    }
+  });
+
   test('WarpGrid buildMorphedVerticesBetweenPresets smoothly handles custom interpolated presets', () {
     const presetA = TerrainPreset(
       p: [1.0, 2.0, 3.0, 4.0],
