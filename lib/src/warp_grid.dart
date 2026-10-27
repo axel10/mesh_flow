@@ -87,10 +87,6 @@ class WarpGrid {
   static Uint16List get indices => _staticIndices;
 
   /// 根据目标尺寸、纹理尺寸和预设索引生成 [ui.Vertices]。
-  ///
-  /// [width] 与 [height] 为渲染目标宽高。
-  /// [textureWidth] 与 [textureHeight] 为纹理像素尺寸（默认为 32.0 × 32.0）。
-  /// [presetIndex] 预设索引 0..4，若为负则根据上次随机选取不重复的预设。
   static ui.Vertices buildVertices({
     required double width,
     required double height,
@@ -100,9 +96,99 @@ class WarpGrid {
   }) {
     final int safeIdx = presetIndex.clamp(0, kTerrainPresets.length - 1);
     final preset = kTerrainPresets[safeIdx];
-    final p = preset.p;
-    final r = preset.r;
+    return buildVerticesWithParams(
+      width: width,
+      height: height,
+      textureWidth: textureWidth,
+      textureHeight: textureHeight,
+      p: preset.p,
+      r: preset.r,
+    );
+  }
 
+  /// 在两个预设索引之间平滑插值（Morphing）生成顶点。
+  static ui.Vertices buildMorphedVertices({
+    required double width,
+    required double height,
+    double textureWidth = 32.0,
+    double textureHeight = 32.0,
+    required int fromPresetIndex,
+    required int toPresetIndex,
+    required double progress,
+  }) {
+    final int fromIdx = fromPresetIndex.clamp(0, kTerrainPresets.length - 1);
+    final int toIdx = toPresetIndex.clamp(0, kTerrainPresets.length - 1);
+    return buildMorphedVerticesBetweenPresets(
+      width: width,
+      height: height,
+      textureWidth: textureWidth,
+      textureHeight: textureHeight,
+      fromPreset: kTerrainPresets[fromIdx],
+      toPreset: kTerrainPresets[toIdx],
+      progress: progress,
+    );
+  }
+
+  /// 在两个预设对象（或自定义插值参数）[fromPreset] 与 [toPreset] 之间平滑插值（Morphing）生成顶点。
+  static ui.Vertices buildMorphedVerticesBetweenPresets({
+    required double width,
+    required double height,
+    double textureWidth = 32.0,
+    double textureHeight = 32.0,
+    required TerrainPreset fromPreset,
+    required TerrainPreset toPreset,
+    required double progress,
+  }) {
+    if (progress <= 0.0) {
+      return buildVerticesWithParams(
+        width: width,
+        height: height,
+        textureWidth: textureWidth,
+        textureHeight: textureHeight,
+        p: fromPreset.p,
+        r: fromPreset.r,
+      );
+    }
+    if (progress >= 1.0) {
+      return buildVerticesWithParams(
+        width: width,
+        height: height,
+        textureWidth: textureWidth,
+        textureHeight: textureHeight,
+        p: toPreset.p,
+        r: toPreset.r,
+      );
+    }
+
+    final double t = progress.clamp(0.0, 1.0);
+    final p = List<double>.generate(
+      4,
+      (i) => fromPreset.p[i] + (toPreset.p[i] - fromPreset.p[i]) * t,
+    );
+    final r = List<double>.generate(
+      12,
+      (i) => fromPreset.r[i] + (toPreset.r[i] - fromPreset.r[i]) * t,
+    );
+
+    return buildVerticesWithParams(
+      width: width,
+      height: height,
+      textureWidth: textureWidth,
+      textureHeight: textureHeight,
+      p: p,
+      r: r,
+    );
+  }
+
+  /// 使用自定义地形参数 [p] 与 [r] 生成顶点。
+  static ui.Vertices buildVerticesWithParams({
+    required double width,
+    required double height,
+    double textureWidth = 32.0,
+    double textureHeight = 32.0,
+    required List<double> p,
+    required List<double> r,
+  }) {
     final positions = Float32List(vertexCount * 2);
     final texCoords = Float32List(vertexCount * 2);
 

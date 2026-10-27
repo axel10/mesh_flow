@@ -13,7 +13,7 @@ import 'warp_grid.dart';
 /// 移植自 QueMusic 播放页背景着色器与网格形变引擎：
 /// - 自动将封面处理为 32×32 微型高饱和平滑贴图
 /// - 采用 28×28 钉边驻波网格与 tanh 折叠面，四边永不漏空
-/// - 支持封面切换时平滑淡入淡出过渡（Cross Fade）
+/// - 切换封面时，网格地形与双纹理色彩在 GPU 端实现平滑形变插值（Morphing & Blend）
 /// - 支持流速调节、暂停/播放与切歌随机地形预设
 class MeshFlow extends StatefulWidget {
   const MeshFlow({
@@ -33,7 +33,8 @@ class MeshFlow extends StatefulWidget {
     this.saturation = 2.6,
     this.contrast = 1.4,
     this.fallbackColor = const Color(0xFF101014),
-    this.crossFadeDuration = const Duration(milliseconds: 700),
+    this.crossFadeDuration = const Duration(milliseconds: 1200),
+    this.fastCrossFadeDuration,
     this.child,
   })  : effectiveSpeed = flowSpeed ?? speed,
         effectiveVignette = vignette ?? vignetteAlpha;
@@ -83,8 +84,14 @@ class MeshFlow extends StatefulWidget {
   /// 纹理未准备好时的背景底色。
   final Color fallbackColor;
 
-  /// 切换封面时的平滑过渡时长。
+  /// 切换封面时的色彩与网格平滑过渡动画时长（默认 1200ms）。
   final Duration crossFadeDuration;
+
+  /// 快速连续切换封面时的平滑过渡动画时长（默认自适应为约 450ms）。
+  ///
+  /// 当在上一次过渡尚未完成便再次切换封面时（例如快速连点切歌），自动启用此快速过渡时长，
+  /// 兼顾平滑无跳变的色彩混合与跟手响应性，避免背景颜色大幅跳变或迟滞。
+  final Duration? fastCrossFadeDuration;
 
   /// 放置在背景之上的子组件（如歌词列表、播放控件等）。
   final Widget? child;
@@ -96,48 +103,25 @@ class MeshFlow extends StatefulWidget {
 /// 兼容别名 [MeshFlowBackground]
 typedef MeshFlowBackground = MeshFlow;
 
-class _LayerState {
-  _LayerState({
-    required this.texture,
-    required this.presetIndex,
-  });
-
-  final ui.Image texture;
-  final int presetIndex;
-  ui.Vertices? vertices;
-  Size? verticesSize;
-
-  void ensureVertices(Size size) {
-    if (vertices == null || verticesSize != size) {
-      verticesSize = size;
-      vertices = WarpGrid.buildVertices(
-        width: size.width,
-        height: size.height,
-        textureWidth: texture.width.toDouble(),
-        textureHeight: texture.height.toDouble(),
-        presetIndex: presetIndex,
-      );
-    }
-  }
-
-  void dispose() {
-    texture.dispose();
-  }
-}
-
-class _MeshFlowState extends State<MeshFlow> with SingleTickerProviderStateMixin {
+class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
   late final Ticker _ticker;
   double _time = 0.0;
   Duration _lastElapsed = Duration.zero;
 
-  _LayerState? _currentLayer;
-  _LayerState? _previousLayer;
+  ui.Image? _currentTexture;
+  ui.Image? _previousTexture;
 
-  AnimationController? _fadeController;
-  Animation<double>? _fadeAnimation;
-
+  late TerrainPreset _fromTerrain;
+  late TerrainPreset _toTerrain;
   int _lastPreset = -1;
   int _activeLoadToken = 0;
+
+  ui.Vertices? _cachedVertices;
+  Size? _lastSize;
+  double _lastVerticesProgress = 1.0;
+
+  late final AnimationController _fadeController;
+  late final CurvedAnimation _fadeAnimation;
 
   @override
   void initState() {
@@ -146,6 +130,32 @@ class _MeshFlowState extends State<MeshFlow> with SingleTickerProviderStateMixin
     if (widget.animating) {
       _ticker.start();
     }
+
+    final initialPresetIdx = widget.presetIndex != null
+        ? widget.presetIndex!.clamp(0, kTerrainPresets.length - 1)
+        : 0;
+    _lastPreset = initialPresetIdx;
+    _fromTerrain = kTerrainPresets[initialPresetIdx];
+    _toTerrain = kTerrainPresets[initialPresetIdx];
+
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: widget.crossFadeDuration,
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeInOutCubic,
+    )..addListener(() {
+        if (mounted) setState(() {});
+      })..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          _previousTexture?.dispose();
+          _previousTexture = null;
+          _fromTerrain = _toTerrain;
+          if (mounted) setState(() {});
+        }
+      });
+
     _loadCover();
   }
 
@@ -159,6 +169,12 @@ class _MeshFlowState extends State<MeshFlow> with SingleTickerProviderStateMixin
         _ticker.start();
       } else if (!widget.animating && _ticker.isActive) {
         _ticker.stop();
+      }
+    }
+
+    if (widget.crossFadeDuration != oldWidget.crossFadeDuration) {
+      if (!_fadeController.isAnimating) {
+        _fadeController.duration = widget.crossFadeDuration;
       }
     }
 
@@ -208,94 +224,199 @@ class _MeshFlowState extends State<MeshFlow> with SingleTickerProviderStateMixin
     return next;
   }
 
+  /// 将当前屏幕上正在混合的双纹理状态合成为单张微型纹理，作为下一次过渡的无缝起始纹理。
+  ui.Image _captureCurrentBlendedTexture(int size) {
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    final rect = Rect.fromLTWH(0, 0, size.toDouble(), size.toDouble());
+
+    if (_previousTexture != null) {
+      final prevSrc = Rect.fromLTWH(
+        0,
+        0,
+        _previousTexture!.width.toDouble(),
+        _previousTexture!.height.toDouble(),
+      );
+      canvas.drawImageRect(
+        _previousTexture!,
+        prevSrc,
+        rect,
+        Paint()..filterQuality = ui.FilterQuality.medium,
+      );
+    }
+
+    if (_currentTexture != null) {
+      final currSrc = Rect.fromLTWH(
+        0,
+        0,
+        _currentTexture!.width.toDouble(),
+        _currentTexture!.height.toDouble(),
+      );
+      final double alpha = _fadeController.isAnimating
+          ? _fadeAnimation.value.clamp(0.0, 1.0)
+          : 1.0;
+      canvas.drawImageRect(
+        _currentTexture!,
+        currSrc,
+        rect,
+        Paint()
+          ..color = Color.fromRGBO(255, 255, 255, alpha)
+          ..filterQuality = ui.FilterQuality.medium,
+      );
+    }
+
+    final picture = recorder.endRecording();
+    return picture.toImageSync(size, size);
+  }
+
   Future<void> _loadCover() async {
     final int token = ++_activeLoadToken;
 
-    ui.Image? texture;
+    ui.Image? newTexture;
     try {
       if (widget.uiImage != null) {
-        texture = await CoverProcessor.processUiImage(
+        newTexture = await CoverProcessor.processUiImage(
           widget.uiImage!,
           targetSize: widget.textureSize,
           saturation: widget.saturation,
           contrast: widget.contrast,
         );
       } else if (widget.coverBytes != null && widget.coverBytes!.isNotEmpty) {
-        texture = await CoverProcessor.processBytes(
+        newTexture = await CoverProcessor.processBytes(
           widget.coverBytes!,
           targetSize: widget.textureSize,
           saturation: widget.saturation,
           contrast: widget.contrast,
         );
       } else if (widget.image != null) {
-        texture = await CoverProcessor.processImageProvider(
+        newTexture = await CoverProcessor.processImageProvider(
           widget.image!,
           targetSize: widget.textureSize,
           saturation: widget.saturation,
           contrast: widget.contrast,
         );
       } else if (widget.palette != null && widget.palette!.isNotEmpty) {
-        texture = await CoverProcessor.createPaletteImage(
+        newTexture = await CoverProcessor.createPaletteImage(
           widget.palette!,
           targetSize: widget.textureSize,
         );
       } else {
-        texture = await CoverProcessor.createFallbackImage(widget.fallbackColor);
+        newTexture = await CoverProcessor.createFallbackImage(widget.fallbackColor);
       }
     } catch (_) {
-      texture = await CoverProcessor.createFallbackImage(widget.fallbackColor);
+      newTexture = await CoverProcessor.createFallbackImage(widget.fallbackColor);
     }
 
     if (!mounted || token != _activeLoadToken) {
-      texture.dispose();
+      newTexture.dispose();
       return;
     }
 
     final int nextPreset = _selectNextPreset();
-    final newLayer = _LayerState(texture: texture, presetIndex: nextPreset);
 
-    if (_currentLayer == null) {
+    if (_currentTexture == null) {
+      // 首次加载完成：直接上屏
       setState(() {
-        _currentLayer = newLayer;
+        _currentTexture = newTexture;
+        _toTerrain = kTerrainPresets[nextPreset];
+        _fromTerrain = _toTerrain;
+        _cachedVertices = null;
       });
       return;
     }
 
-    // 开启平滑淡入淡出过渡
-    _previousLayer?.dispose();
-    _previousLayer = _currentLayer;
-    _currentLayer = newLayer;
+    final bool isRapidSwitch = _fadeController.isAnimating;
 
-    _fadeController?.dispose();
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: widget.crossFadeDuration,
-    );
-    _fadeAnimation = CurvedAnimation(
-      parent: _fadeController!,
-      curve: Curves.easeInOut,
-    )..addListener(() {
-        if (mounted) setState(() {});
-      })..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          _previousLayer?.dispose();
-          _previousLayer = null;
-          _fadeController?.dispose();
-          _fadeController = null;
-          _fadeAnimation = null;
-          if (mounted) setState(() {});
-        }
-      });
+    if (isRapidSwitch && _previousTexture != null && _currentTexture != null) {
+      final double progress = _fadeAnimation.value;
+      if (progress < 0.999) {
+        // 快速连续切换：捕获当前屏幕已渲染的双纹理融合结果，作为新过渡的底图，避免色彩剧烈跳变
+        final blended = _captureCurrentBlendedTexture(widget.textureSize);
+        _previousTexture?.dispose();
+        _currentTexture?.dispose();
+        _previousTexture = blended;
 
-    _fadeController!.forward();
+        // 顶点地形在当前插值形态上连续过渡，避免网格几何突变拉扯
+        final currentP = List<double>.generate(
+          4,
+          (i) => _fromTerrain.p[i] + (_toTerrain.p[i] - _fromTerrain.p[i]) * progress,
+        );
+        final currentR = List<double>.generate(
+          12,
+          (i) => _fromTerrain.r[i] + (_toTerrain.r[i] - _fromTerrain.r[i]) * progress,
+        );
+        _fromTerrain = TerrainPreset(p: currentP, r: currentR);
+      } else {
+        _previousTexture?.dispose();
+        _previousTexture = _currentTexture;
+        _fromTerrain = _toTerrain;
+      }
+    } else {
+      _previousTexture?.dispose();
+      _previousTexture = _currentTexture;
+      _fromTerrain = _toTerrain;
+    }
+
+    _currentTexture = newTexture;
+    _toTerrain = kTerrainPresets[nextPreset];
+    _cachedVertices = null;
+
+    final Duration duration = isRapidSwitch
+        ? (widget.fastCrossFadeDuration ??
+            Duration(
+              milliseconds: (widget.crossFadeDuration.inMilliseconds * 0.38)
+                  .round()
+                  .clamp(300, 600),
+            ))
+        : widget.crossFadeDuration;
+
+    _fadeAnimation.curve = isRapidSwitch ? Curves.easeOutCubic : Curves.easeInOutCubic;
+    _fadeController.duration = duration;
+    _fadeController.forward(from: 0.0);
+  }
+
+  ui.Vertices _getOrBuildVertices(Size size, double progress) {
+    final bool needRebuild = _cachedVertices == null ||
+        _lastSize != size ||
+        (_fadeController.isAnimating && (_lastVerticesProgress - progress).abs() > 0.015);
+
+    if (needRebuild) {
+      _lastSize = size;
+      _lastVerticesProgress = progress;
+
+      final double texW = _currentTexture?.width.toDouble() ?? 32.0;
+      final double texH = _currentTexture?.height.toDouble() ?? 32.0;
+
+      if (progress >= 1.0) {
+        _cachedVertices = WarpGrid.buildVerticesWithParams(
+          width: size.width,
+          height: size.height,
+          textureWidth: texW,
+          textureHeight: texH,
+          p: _toTerrain.p,
+          r: _toTerrain.r,
+        );
+      } else {
+        _cachedVertices = WarpGrid.buildMorphedVerticesBetweenPresets(
+          width: size.width,
+          height: size.height,
+          textureWidth: texW,
+          textureHeight: texH,
+          fromPreset: _fromTerrain,
+          toPreset: _toTerrain,
+          progress: progress,
+        );
+      }
+    }
+    return _cachedVertices!;
   }
 
   @override
   void dispose() {
     _ticker.dispose();
-    _fadeController?.dispose();
-    _currentLayer?.dispose();
-    _previousLayer?.dispose();
+    _fadeController.dispose();
+    _currentTexture?.dispose();
+    _previousTexture?.dispose();
     super.dispose();
   }
 
@@ -304,50 +425,26 @@ class _MeshFlowState extends State<MeshFlow> with SingleTickerProviderStateMixin
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
+        final double progress = _fadeController.isAnimating ? _fadeAnimation.value : 1.0;
 
-        if (size.width > 0 && size.height > 0) {
-          _currentLayer?.ensureVertices(size);
-          _previousLayer?.ensureVertices(size);
+        ui.Vertices? vertices;
+        if (size.width > 0 && size.height > 0 && _currentTexture != null) {
+          vertices = _getOrBuildVertices(size, progress);
         }
 
-        final double fadeProgress = _fadeAnimation?.value ?? 1.0;
-
-        Widget content = CustomPaint(
+        final content = CustomPaint(
           size: Size.infinite,
-          painter: _currentLayer == null
-              ? null
-              : MeshFlowPainter(
-                  vertices: _currentLayer!.vertices,
-                  texture: _currentLayer!.texture,
-                  time: _time,
-                  flowSpeed: widget.effectiveSpeed,
-                  vignetteAlpha: widget.effectiveVignette,
-                  fallbackColor: widget.fallbackColor,
-                ),
+          painter: MeshFlowPainter(
+            vertices: vertices,
+            texture: _currentTexture,
+            previousTexture: _previousTexture,
+            transitionProgress: progress,
+            time: _time,
+            flowSpeed: widget.effectiveSpeed,
+            vignetteAlpha: widget.effectiveVignette,
+            fallbackColor: widget.fallbackColor,
+          ),
         );
-
-        if (_previousLayer != null && fadeProgress < 1.0) {
-          content = Stack(
-            fit: StackFit.expand,
-            children: [
-              CustomPaint(
-                size: Size.infinite,
-                painter: MeshFlowPainter(
-                  vertices: _previousLayer!.vertices,
-                  texture: _previousLayer!.texture,
-                  time: _time,
-                  flowSpeed: widget.effectiveSpeed,
-                  vignetteAlpha: widget.effectiveVignette,
-                  fallbackColor: widget.fallbackColor,
-                ),
-              ),
-              Opacity(
-                opacity: fadeProgress,
-                child: content,
-              ),
-            ],
-          );
-        }
 
         if (widget.child != null) {
           return Stack(

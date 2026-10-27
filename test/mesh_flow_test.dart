@@ -16,6 +16,17 @@ void main() {
       );
       expect(vertices, isNotNull);
     }
+
+    final morphed = WarpGrid.buildMorphedVertices(
+      width: 400,
+      height: 800,
+      textureWidth: 32,
+      textureHeight: 32,
+      fromPresetIndex: 0,
+      toPresetIndex: 1,
+      progress: 0.5,
+    );
+    expect(morphed, isNotNull);
   });
 
   test('CoverProcessor generates fallback and draws with drawVertices', () async {
@@ -71,5 +82,122 @@ void main() {
 
     expect(find.text('Playing Music'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 100));
+  });
+
+  testWidgets('MeshFlow handles rapid continuous palette switching smoothly', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MeshFlow(
+            animating: false,
+            palette: [Colors.red, Colors.orange],
+            crossFadeDuration: Duration(milliseconds: 1000),
+            fastCrossFadeDuration: Duration(milliseconds: 300),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Fast switch 1: red -> blue
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MeshFlow(
+            animating: false,
+            palette: [Colors.blue, Colors.cyan],
+            crossFadeDuration: Duration(milliseconds: 1000),
+            fastCrossFadeDuration: Duration(milliseconds: 300),
+          ),
+        ),
+      ),
+    );
+    // Partially advance transition (e.g. 50ms into transition)
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // Fast switch 2: interrupt before complete -> green
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MeshFlow(
+            animating: false,
+            palette: [Colors.green, Colors.lime],
+            crossFadeDuration: Duration(milliseconds: 1000),
+            fastCrossFadeDuration: Duration(milliseconds: 300),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // Fast switch 3: interrupt again -> purple
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MeshFlow(
+            animating: false,
+            palette: [Colors.purple, Colors.deepPurple],
+            crossFadeDuration: Duration(milliseconds: 1000),
+            fastCrossFadeDuration: Duration(milliseconds: 300),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // Fast switch 4: interrupt again -> yellow
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MeshFlow(
+            animating: false,
+            palette: [Colors.yellow, Colors.amber],
+            crossFadeDuration: Duration(milliseconds: 1000),
+            fastCrossFadeDuration: Duration(milliseconds: 300),
+          ),
+        ),
+      ),
+    );
+
+    // Let it settle smoothly to the final color
+    await tester.pump(const Duration(milliseconds: 400));
+  });
+
+  test('WarpGrid buildMorphedVerticesBetweenPresets smoothly handles custom interpolated presets', () {
+    const presetA = TerrainPreset(
+      p: [1.0, 2.0, 3.0, 4.0],
+      r: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.5, 0.2],
+    );
+    const presetB = TerrainPreset(
+      p: [2.0, 3.0, 4.0, 5.0],
+      r: [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0, -0.5, -0.2],
+    );
+
+    final vertices0 = WarpGrid.buildMorphedVerticesBetweenPresets(
+      width: 300,
+      height: 600,
+      fromPreset: presetA,
+      toPreset: presetB,
+      progress: 0.0,
+    );
+    expect(vertices0, isNotNull);
+
+    final verticesMid = WarpGrid.buildMorphedVerticesBetweenPresets(
+      width: 300,
+      height: 600,
+      fromPreset: presetA,
+      toPreset: presetB,
+      progress: 0.5,
+    );
+    expect(verticesMid, isNotNull);
+
+    final vertices1 = WarpGrid.buildMorphedVerticesBetweenPresets(
+      width: 300,
+      height: 600,
+      fromPreset: presetA,
+      toPreset: presetB,
+      progress: 1.0,
+    );
+    expect(vertices1, isNotNull);
   });
 }
