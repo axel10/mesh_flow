@@ -1,5 +1,6 @@
-/// A Calculator.
-class Calculator {
-  /// Returns [value] plus 1.
-  int addOne(int value) => value + 1;
-}
+library;
+
+export 'src/cover_processor.dart';
+export 'src/mesh_flow_painter.dart';
+export 'src/mesh_flow_widget.dart';
+export 'src/warp_grid.dart';

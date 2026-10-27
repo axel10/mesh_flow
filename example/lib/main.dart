@@ -1,122 +1,394 @@
 import 'package:flutter/material.dart';
+import 'package:mesh_flow/mesh_flow.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const MeshFlowExampleApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class SongItem {
+  const SongItem({
+    required this.title,
+    required this.artist,
+    required this.assetPath,
+  });
 
-  // This widget is the root of your application.
+  final String title;
+  final String artist;
+  final String assetPath;
+}
+
+const List<SongItem> kDemoSongs = [
+  SongItem(
+    title: 'No Smile No Life',
+    artist: 'yugu',
+    assetPath: 'assets/yugu - No Smile No Life - Cover.jpg',
+  ),
+  SongItem(
+    title: '明晰メモリー',
+    artist: 'ナナホシ管弦楽団',
+    assetPath: 'assets/ナナホシ管弦楽団 - 明晰メモリー - Cover.jpg',
+  ),
+  SongItem(
+    title: 'Summer drop',
+    artist: 'ジョニ',
+    assetPath: 'assets/ジョニ - Summer drop - Cover.jpg',
+  ),
+  SongItem(
+    title: 'ハッピーラブソングトゥーユー',
+    artist: 'あだちかすか',
+    assetPath: 'assets/あだちかすか - ハッピーラブソングトゥーユー - Cover.jpg',
+  ),
+  SongItem(
+    title: '恋はきっと急上昇☆-Rock Buster-',
+    artist: 'のぼる↑, Haru.jpg',
+    assetPath: 'assets/のぼる↑, Haru.jpg - 恋はきっと急上昇☆-Rock Buster- - Cover.jpg',
+  ),
+];
+
+class MeshFlowExampleApp extends StatelessWidget {
+  const MeshFlowExampleApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+      title: 'MeshFlow Demo',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.white,
+          secondary: Colors.white70,
+        ),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const PlayerPage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class PlayerPage extends StatefulWidget {
+  const PlayerPage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _PlayerPageState extends State<PlayerPage> {
+  int _currentSongIndex = 0;
+  bool _isPlaying = true;
+  double _flowSpeed = 1.0;
+  double _vignetteAlpha = 0.35;
+  int? _selectedPreset; // null = 切歌随机
 
-  void _incrementCounter() {
+  void _nextSong() {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _currentSongIndex = (_currentSongIndex + 1) % kDemoSongs.length;
+    });
+  }
+
+  void _previousSong() {
+    setState(() {
+      _currentSongIndex =
+          (_currentSongIndex - 1 + kDemoSongs.length) % kDemoSongs.length;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final song = kDemoSongs[_currentSongIndex];
+    final imageProvider = AssetImage(song.assetPath);
+
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+      body: MeshFlow(
+        image: imageProvider,
+        presetIndex: _selectedPreset,
+        flowSpeed: _flowSpeed,
+        animating: _isPlaying,
+        vignetteAlpha: _vignetteAlpha,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // 顶栏操作区
+              _buildTopBar(),
+              const Spacer(),
+              // 居中封面（带阴影与圆角）
+              _buildCoverCard(imageProvider),
+              const SizedBox(height: 36),
+              // 歌曲与歌手信息
+              Text(
+                song.title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.5,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                song.artist,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.white.withValues(alpha: 0.7),
+                ),
+              ),
+              const Spacer(),
+              // 播放器控制栏
+              _buildPlaybackControls(),
+              const SizedBox(height: 20),
+              // 底部控制面板（流速、暗角、预设调节）
+              _buildControlPanel(),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'Vynody / MeshFlow',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+              color: Colors.white70,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: Colors.white70),
+            onPressed: () => _showSettingsBottomSheet(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoverCard(ImageProvider imageProvider) {
+    return Center(
+      child: Container(
+        width: 260,
+        height: 260,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 36,
+              offset: const Offset(0, 16),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 500),
+          child: Image(
+            key: ValueKey<int>(_currentSongIndex),
+            image: imageProvider,
+            fit: BoxFit.cover,
+            width: 260,
+            height: 260,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaybackControls() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          IconButton(
+            iconSize: 38,
+            icon: const Icon(Icons.skip_previous_rounded),
+            color: Colors.white,
+            onPressed: _previousSong,
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              iconSize: 52,
+              icon: Icon(_isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+              color: Colors.white,
+              onPressed: () {
+                setState(() {
+                  _isPlaying = !_isPlaying;
+                });
+              },
+            ),
+          ),
+          IconButton(
+            iconSize: 38,
+            icon: const Icon(Icons.skip_next_rounded),
+            color: Colors.white,
+            onPressed: _nextSong,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlPanel() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildChip(
+            label: _selectedPreset == null ? '地形: 随机' : '地形: #$_selectedPreset',
+            icon: Icons.terrain_rounded,
+            onTap: () {
+              setState(() {
+                if (_selectedPreset == null) {
+                  _selectedPreset = 0;
+                } else if (_selectedPreset! < kTerrainPresets.length - 1) {
+                  _selectedPreset = _selectedPreset! + 1;
+                } else {
+                  _selectedPreset = null;
+                }
+              });
+            },
+          ),
+          _buildChip(
+            label: '流速: ${_flowSpeed.toStringAsFixed(1)}x',
+            icon: Icons.speed_rounded,
+            onTap: () {
+              setState(() {
+                if (_flowSpeed >= 2.5) {
+                  _flowSpeed = 0.5;
+                } else {
+                  _flowSpeed += 0.5;
+                }
+              });
+            },
+          ),
+          _buildChip(
+            label: '暗角: ${(_vignetteAlpha * 100).round()}%',
+            icon: Icons.vignette_rounded,
+            onTap: () {
+              setState(() {
+                if (_vignetteAlpha >= 0.6) {
+                  _vignetteAlpha = 0.0;
+                } else {
+                  _vignetteAlpha += 0.15;
+                }
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip({
+    required String label,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('You have pushed the button this many times:'),
+            Icon(icon, size: 16, color: Colors.white70),
+            const SizedBox(width: 4),
             Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+              label,
+              style: const TextStyle(fontSize: 12, color: Colors.white),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+    );
+  }
+
+  void _showSettingsBottomSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '背景参数调节',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 20),
+                  Text('流速: ${_flowSpeed.toStringAsFixed(2)}x'),
+                  Slider(
+                    value: _flowSpeed,
+                    min: 0.1,
+                    max: 3.0,
+                    onChanged: (val) {
+                      setModalState(() => _flowSpeed = val);
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Text('暗角强度: ${(_vignetteAlpha * 100).round()}%'),
+                  Slider(
+                    value: _vignetteAlpha,
+                    min: 0.0,
+                    max: 0.8,
+                    onChanged: (val) {
+                      setModalState(() => _vignetteAlpha = val);
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('选择歌曲'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: List.generate(kDemoSongs.length, (idx) {
+                      return ChoiceChip(
+                        label: Text(kDemoSongs[idx].title),
+                        selected: _currentSongIndex == idx,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setModalState(() => _currentSongIndex = idx);
+                            setState(() {});
+                          }
+                        },
+                      );
+                    }),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
