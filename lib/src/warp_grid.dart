@@ -93,6 +93,7 @@ class WarpGrid {
     double textureWidth = 32.0,
     double textureHeight = 32.0,
     int presetIndex = 0,
+    double time = 0.0,
   }) {
     final int safeIdx = presetIndex.clamp(0, kTerrainPresets.length - 1);
     final preset = kTerrainPresets[safeIdx];
@@ -103,6 +104,7 @@ class WarpGrid {
       textureHeight: textureHeight,
       p: preset.p,
       r: preset.r,
+      time: time,
     );
   }
 
@@ -115,6 +117,7 @@ class WarpGrid {
     required int fromPresetIndex,
     required int toPresetIndex,
     required double progress,
+    double time = 0.0,
   }) {
     final int fromIdx = fromPresetIndex.clamp(0, kTerrainPresets.length - 1);
     final int toIdx = toPresetIndex.clamp(0, kTerrainPresets.length - 1);
@@ -126,6 +129,7 @@ class WarpGrid {
       fromPreset: kTerrainPresets[fromIdx],
       toPreset: kTerrainPresets[toIdx],
       progress: progress,
+      time: time,
     );
   }
 
@@ -138,6 +142,7 @@ class WarpGrid {
     required TerrainPreset fromPreset,
     required TerrainPreset toPreset,
     required double progress,
+    double time = 0.0,
   }) {
     if (progress <= 0.0) {
       return buildVerticesWithParams(
@@ -147,6 +152,7 @@ class WarpGrid {
         textureHeight: textureHeight,
         p: fromPreset.p,
         r: fromPreset.r,
+        time: time,
       );
     }
     if (progress >= 1.0) {
@@ -157,6 +163,7 @@ class WarpGrid {
         textureHeight: textureHeight,
         p: toPreset.p,
         r: toPreset.r,
+        time: time,
       );
     }
 
@@ -177,10 +184,32 @@ class WarpGrid {
       textureHeight: textureHeight,
       p: p,
       r: r,
+      time: time,
+    );
+  }
+
+  /// 站波幅值的时间调制系数：幅值按 `1 ± kPulse` 缓慢呼吸，产生持续的流变感。
+  static const double kAmplitudePulse = 0.26;
+
+  /// 时间调制的角频率（乘以由 `speed` 缩放后的时间）。
+  static const double kPulseRate = 2.0;
+
+  /// 按时间调制各模态幅值。
+  ///
+  /// 只缩放幅值、不改变模态本身的零点位置，因此四边依然被钉死在 u/v = 0、1 上，
+  /// 网格既不会拉胶也不会露空。
+  static List<double> _modulateAmplitudes(List<double> r, double time) {
+    final double t = time * kPulseRate;
+    return List<double>.generate(
+      r.length,
+      (i) => r[i] * (1.0 + kAmplitudePulse * math.sin(t + i * 1.7)),
+      growable: false,
     );
   }
 
   /// 使用自定义地形参数 [p] 与 [r] 生成顶点。
+  ///
+  /// [time] 大于 0 时，驻波幅值会随时间缓慢调制，网格持续流变。
   static ui.Vertices buildVerticesWithParams({
     required double width,
     required double height,
@@ -188,7 +217,12 @@ class WarpGrid {
     double textureHeight = 32.0,
     required List<double> p,
     required List<double> r,
+    double time = 0.0,
   }) {
+    final List<double> amp = time == 0.0
+        ? r
+        : _modulateAmplitudes(r, time);
+
     final positions = Float32List(vertexCount * 2);
     final texCoords = Float32List(vertexCount * 2);
 
@@ -209,13 +243,13 @@ class WarpGrid {
         final double m4 = math.sin(2.0 * kPi * u) * math.sin(2.0 * kPi * v);
 
         // 山坡（驻波模态叠加） + 悬崖（tanh 折叠面与中心包络向边缘渐隐）
-        final double dx = 0.12 * (r[0] * m1 + r[1] * m2 + r[2] * m4) +
-            0.10 * r[8] * _fastTanh(6.0 * (v - 0.5 - 0.30 * math.sin(p[0]))) * m1 +
-            0.06 * r[9] * _fastTanh(6.0 * ((u + v) * 0.7 - 0.7 - 0.33 * math.sin(p[1]))) * m1;
+        final double dx = 0.12 * (amp[0] * m1 + amp[1] * m2 + amp[2] * m4) +
+            0.10 * amp[8] * _fastTanh(6.0 * (v - 0.5 - 0.30 * math.sin(p[0]))) * m1 +
+            0.06 * amp[9] * _fastTanh(6.0 * ((u + v) * 0.7 - 0.7 - 0.33 * math.sin(p[1]))) * m1;
 
-        final double dy = 0.12 * (r[5] * m1 + r[6] * m3 + r[7] * m4) +
-            0.12 * r[10] * _fastTanh(6.0 * (v - 0.5 - 0.30 * math.sin(p[2]))) * m1 +
-            0.06 * r[11] * _fastTanh(6.0 * ((u - v) * 0.7 - 0.7 + 0.33 * math.sin(p[3]))) * m1;
+        final double dy = 0.12 * (amp[5] * m1 + amp[6] * m3 + amp[7] * m4) +
+            0.12 * amp[10] * _fastTanh(6.0 * (v - 0.5 - 0.30 * math.sin(p[2]))) * m1 +
+            0.06 * amp[11] * _fastTanh(6.0 * ((u - v) * 0.7 - 0.7 + 0.33 * math.sin(p[3]))) * m1;
 
         positions[posIndex++] = (u + dx) * width;
         positions[posIndex++] = (v + dy) * height;

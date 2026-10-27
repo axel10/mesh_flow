@@ -16,17 +16,22 @@ class MeshFlowPainter extends CustomPainter {
     this.previousTexture,
     this.transitionProgress = 1.0,
     required this.time,
-    this.flowSpeed = 1.0,
     this.vignetteAlpha = 0.35,
     this.fallbackColor = Colors.black,
   });
+
+  /// 贴图基础自转角速度（弧度/秒·单位流速）。
+  ///
+  /// [time] 已经按流速缩放，这里不能再乘一次，否则流速会被平方级压低。
+  static const double kTextureSpinRate = 0.24;
 
   final ui.Vertices? vertices;
   final ui.Image? texture;
   final ui.Image? previousTexture;
   final double transitionProgress;
+
+  /// 已按流速缩放的流逝时间。
   final double time;
-  final double flowSpeed;
   final double vignetteAlpha;
   final Color fallbackColor;
 
@@ -43,7 +48,7 @@ class MeshFlowPainter extends CustomPainter {
 
     // 1. 纹理旋转矩阵
     // 复刻 QueMusic: vec2 c = vUV - vec2(0.35); const float ang = -u_time * 0.24;
-    final double ang = -time * 0.24 * flowSpeed;
+    final double ang = -time * kTextureSpinRate;
     final double texW = texture!.width.toDouble();
     final double texH = texture!.height.toDouble();
 
@@ -139,7 +144,6 @@ class MeshFlowPainter extends CustomPainter {
         oldDelegate.previousTexture != previousTexture ||
         oldDelegate.transitionProgress != transitionProgress ||
         oldDelegate.time != time ||
-        oldDelegate.flowSpeed != flowSpeed ||
         oldDelegate.vignetteAlpha != vignetteAlpha ||
         oldDelegate.fallbackColor != fallbackColor;
   }

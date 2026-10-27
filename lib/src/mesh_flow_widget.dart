@@ -119,6 +119,7 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
   ui.Vertices? _cachedVertices;
   Size? _lastSize;
   double _lastVerticesProgress = 1.0;
+  double _lastVerticesTime = 0.0;
 
   late final AnimationController _fadeController;
   late final CurvedAnimation _fadeAnimation;
@@ -375,14 +376,19 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     _fadeController.forward(from: 0.0);
   }
 
+  /// 网格几何随 [time] 持续流变，因此只要时间在走就需要重建。
+  /// 停顿（[MeshFlow.animating] 为 false）时复用缓存，不再空转。
   ui.Vertices _getOrBuildVertices(Size size, double progress) {
     final bool needRebuild = _cachedVertices == null ||
         _lastSize != size ||
-        (_fadeController.isAnimating && (_lastVerticesProgress - progress).abs() > 0.015);
+        _lastVerticesTime != _time ||
+        (_fadeController.isAnimating &&
+            (_lastVerticesProgress - progress).abs() > 0.015);
 
     if (needRebuild) {
       _lastSize = size;
       _lastVerticesProgress = progress;
+      _lastVerticesTime = _time;
 
       final double texW = _currentTexture?.width.toDouble() ?? 32.0;
       final double texH = _currentTexture?.height.toDouble() ?? 32.0;
@@ -395,6 +401,7 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
           textureHeight: texH,
           p: _toTerrain.p,
           r: _toTerrain.r,
+          time: _time,
         );
       } else {
         _cachedVertices = WarpGrid.buildMorphedVerticesBetweenPresets(
@@ -405,6 +412,7 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
           fromPreset: _fromTerrain,
           toPreset: _toTerrain,
           progress: progress,
+          time: _time,
         );
       }
     }
@@ -440,7 +448,6 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
             previousTexture: _previousTexture,
             transitionProgress: progress,
             time: _time,
-            flowSpeed: widget.effectiveSpeed,
             vignetteAlpha: widget.effectiveVignette,
             fallbackColor: widget.fallbackColor,
           ),
