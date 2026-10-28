@@ -339,11 +339,11 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
 
         // 顶点地形在当前插值形态上连续过渡，避免网格几何突变拉扯
         final currentP = List<double>.generate(
-          4,
+          _fromTerrain.p.length,
           (i) => _fromTerrain.p[i] + (_toTerrain.p[i] - _fromTerrain.p[i]) * progress,
         );
         final currentR = List<double>.generate(
-          12,
+          _fromTerrain.r.length,
           (i) => _fromTerrain.r[i] + (_toTerrain.r[i] - _fromTerrain.r[i]) * progress,
         );
         _fromTerrain = TerrainPreset(p: currentP, r: currentR);

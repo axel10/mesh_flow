@@ -163,29 +163,35 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   });
 
-  test('地形预设池保持「硬边 : 柔和 = 1 : 1」的配比', () {
+  test('地形预设池保持「硬边多于柔和」的配比', () {
     final int hardCount = kTerrainPresets.where((p) => p.hardEdge).length;
     final int softCount = kTerrainPresets.length - hardCount;
 
+    // 按需求硬边组偏多（11 : 7），但不能一边倒——随机切歌仍要抽到柔和地形。
     expect(
       hardCount,
+      greaterThan(softCount),
+      reason: '硬边 $hardCount 组 / 柔和 $softCount 组，应为硬边偏多',
+    );
+    expect(
       softCount,
-      reason: '硬边 $hardCount 组 / 柔和 $softCount 组，随机切歌会偏向某一种风格',
+      greaterThanOrEqualTo(5),
+      reason: '柔和只剩 $softCount 组，每几首就会连着「裂」',
     );
 
     for (final preset in kTerrainPresets) {
-      expect(preset.p.length, 4);
+      expect(preset.p.length, 6);
       expect(preset.r.length, 12);
     }
   });
 
   test('WarpGrid buildMorphedVerticesBetweenPresets smoothly handles custom interpolated presets', () {
     const presetA = TerrainPreset(
-      p: [1.0, 2.0, 3.0, 4.0],
+      p: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
       r: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.5, 0.2],
     );
     const presetB = TerrainPreset(
-      p: [2.0, 3.0, 4.0, 5.0],
+      p: [2.0, 3.0, 4.0, 5.0, 0.5, 1.5],
       r: [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0, -0.5, -0.2],
     );
 
