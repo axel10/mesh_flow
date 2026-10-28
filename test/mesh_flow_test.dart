@@ -222,4 +222,22 @@ void main() {
     );
     expect(vertices1, isNotNull);
   });
+
+  testWidgets('MeshFlow supports edgeStyle and initializes without errors', (tester) async {
+    for (final style in MeshFlowEdgeStyle.values) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MeshFlow(
+              edgeStyle: style,
+              animating: false,
+              palette: const [Colors.blue, Colors.purple],
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byType(MeshFlow), findsOneWidget);
+    }
+  });
 }

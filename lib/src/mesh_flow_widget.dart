@@ -8,6 +8,18 @@ import 'cover_processor.dart';
 import 'mesh_flow_painter.dart';
 import 'warp_grid.dart';
 
+/// 动态流变边缘风格。
+enum MeshFlowEdgeStyle {
+  /// 随机交替：包含全部预设（平缓柔和与锐利折痕）。
+  random,
+
+  /// 柔和弥散：仅包含平缓山坡与大波澜预设（hardEdge == false）。
+  soft,
+
+  /// 棱角光刃：仅包含带刀锋/断崖/折光硬边的预设（hardEdge == true）。
+  sharp,
+}
+
 /// 流体动态网格背景组件。
 ///
 /// 移植自 QueMusic 播放页背景着色器与网格形变引擎：
@@ -24,6 +36,7 @@ class MeshFlow extends StatefulWidget {
     this.coverKey,
     this.palette,
     this.presetIndex,
+    this.edgeStyle = MeshFlowEdgeStyle.random,
     this.speed = 1.0,
     double? flowSpeed,
     this.animating = true,
@@ -54,8 +67,11 @@ class MeshFlow extends StatefulWidget {
   /// 调色盘主色列表（在无封面或图片解码前用作平滑渐变背景）。
   final List<Color>? palette;
 
-  /// 指定地形预设索引（0 ~ [kTerrainPresets].length - 1）。若为 null，则在切歌时随机选取不重复的预设。
+  /// 指定地形预设索引（0 ~ [kTerrainPresets].length - 1）。若为 null，则根据 [edgeStyle] 随机选取。
   final int? presetIndex;
+
+  /// 地形分界边缘风格（随机交替 / 柔和弥散 / 棱角光刃）。
+  final MeshFlowEdgeStyle edgeStyle;
 
   /// 流动速度倍率。
   final double speed;
@@ -132,9 +148,7 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
       _ticker.start();
     }
 
-    final initialPresetIdx = widget.presetIndex != null
-        ? widget.presetIndex!.clamp(0, kTerrainPresets.length - 1)
-        : 0;
+    final initialPresetIdx = _selectNextPreset();
     _lastPreset = initialPresetIdx;
     _fromTerrain = kTerrainPresets[initialPresetIdx];
     _toTerrain = kTerrainPresets[initialPresetIdx];
@@ -179,12 +193,15 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
       }
     }
 
+    final bool edgeStyleChanged = widget.edgeStyle != oldWidget.edgeStyle;
+
     final bool coverChanged = widget.coverKey != oldWidget.coverKey ||
         widget.image != oldWidget.image ||
         widget.uiImage != oldWidget.uiImage ||
         !listEquals(widget.coverBytes, oldWidget.coverBytes) ||
         !listEquals(widget.palette, oldWidget.palette) ||
         widget.presetIndex != oldWidget.presetIndex ||
+        edgeStyleChanged ||
         widget.textureSize != oldWidget.textureSize ||
         widget.saturation != oldWidget.saturation ||
         widget.contrast != oldWidget.contrast;
@@ -215,11 +232,38 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     if (widget.presetIndex != null) {
       return widget.presetIndex!.clamp(0, kTerrainPresets.length - 1);
     }
-    final int count = kTerrainPresets.length;
+    final List<int> candidateIndices;
+    switch (widget.edgeStyle) {
+      case MeshFlowEdgeStyle.soft:
+        candidateIndices = [
+          for (int i = 0; i < kTerrainPresets.length; i++)
+            if (!kTerrainPresets[i].hardEdge) i,
+        ];
+        break;
+      case MeshFlowEdgeStyle.sharp:
+        candidateIndices = [
+          for (int i = 0; i < kTerrainPresets.length; i++)
+            if (kTerrainPresets[i].hardEdge) i,
+        ];
+        break;
+      case MeshFlowEdgeStyle.random:
+      default:
+        candidateIndices = [
+          for (int i = 0; i < kTerrainPresets.length; i++) i,
+        ];
+        break;
+    }
+    if (candidateIndices.isEmpty) {
+      return 0;
+    }
+    final int count = candidateIndices.length;
     final random = math.Random();
-    int next = random.nextInt(count);
-    if (next == _lastPreset && count > 1) {
-      next = (next + 1 + random.nextInt(count - 1)) % count;
+    int next = candidateIndices[random.nextInt(count)];
+    if (count > 1 && next == _lastPreset) {
+      final pool = candidateIndices.where((idx) => idx != _lastPreset).toList();
+      if (pool.isNotEmpty) {
+        next = pool[random.nextInt(pool.length)];
+      }
     }
     _lastPreset = next;
     return next;
