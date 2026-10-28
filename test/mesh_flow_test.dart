@@ -240,4 +240,85 @@ void main() {
       expect(find.byType(MeshFlow), findsOneWidget);
     }
   });
+
+  test('WarpGrid.selectPresetIndex adapts to screen orientation', () {
+    const landscapeSize = Size(1600, 900);
+    const portraitSize = Size(400, 800);
+
+    // 1. 横屏下彻底避开 portraitOnly 预设
+    for (int i = 0; i < 500; i++) {
+      final idx = WarpGrid.selectPresetIndex(
+        size: landscapeSize,
+        edgeStyle: MeshFlowEdgeStyle.sharp,
+        adaptiveTerrain: true,
+      );
+      final preset = kTerrainPresets[idx];
+      expect(
+        preset.suitability,
+        isNot(TerrainSuitability.portraitOnly),
+        reason: '横屏下不应抽到 portraitOnly 地形 (#$idx)',
+      );
+    }
+
+    // 2. 竖屏下增加 portraitOnly 与 portraitPreferred 的出现概率
+    int portraitOptimizedHits = 0;
+    const int trials = 1000;
+    for (int i = 0; i < trials; i++) {
+      final idx = WarpGrid.selectPresetIndex(
+        size: portraitSize,
+        edgeStyle: MeshFlowEdgeStyle.sharp,
+        adaptiveTerrain: true,
+      );
+      final preset = kTerrainPresets[idx];
+      if (preset.suitability == TerrainSuitability.portraitOnly ||
+          preset.suitability == TerrainSuitability.portraitPreferred) {
+        portraitOptimizedHits++;
+      }
+    }
+    // 理论权重占比为 32/40 = 80%，实际采样应显著大于 65%
+    expect(portraitOptimizedHits / trials, greaterThan(0.65));
+
+    // 3. 关闭自适应时（adaptiveTerrain: false），横屏亦可正常抽中 portraitOnly
+    int portraitOnlyHitsWithoutAdaptive = 0;
+    for (int i = 0; i < trials; i++) {
+      final idx = WarpGrid.selectPresetIndex(
+        size: landscapeSize,
+        edgeStyle: MeshFlowEdgeStyle.sharp,
+        adaptiveTerrain: false,
+      );
+      if (kTerrainPresets[idx].suitability == TerrainSuitability.portraitOnly) {
+        portraitOnlyHitsWithoutAdaptive++;
+      }
+    }
+    expect(portraitOnlyHitsWithoutAdaptive, greaterThan(0));
+  });
+
+  testWidgets('MeshFlow supports custom presetSelector and adaptiveTerrain parameter', (tester) async {
+    MeshFlowTerrainContext? capturedContext;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 800,
+              height: 400,
+              child: MeshFlow(
+                animating: false,
+                palette: const [Colors.teal, Colors.cyan],
+                presetSelector: (context) {
+                  capturedContext = context;
+                  return 3;
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(capturedContext, isNotNull);
+    expect(capturedContext!.aspectRatio, closeTo(2.0, 0.05));
+    expect(find.byType(MeshFlow), findsOneWidget);
+  });
 }

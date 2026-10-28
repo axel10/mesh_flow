@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,17 +7,34 @@ import 'cover_processor.dart';
 import 'mesh_flow_painter.dart';
 import 'warp_grid.dart';
 
-/// 动态流变边缘风格。
-enum MeshFlowEdgeStyle {
-  /// 随机交替：包含全部预设（平缓柔和与锐利折痕）。
-  random,
+/// 提供给自定义地形预设选择器 [MeshFlowPresetSelector] 的环境信息。
+class MeshFlowTerrainContext {
+  const MeshFlowTerrainContext({
+    required this.size,
+    required this.aspectRatio,
+    required this.lastPresetIndex,
+    required this.edgeStyle,
+    required this.presets,
+  });
 
-  /// 柔和弥散：仅包含平缓山坡与大波澜预设（hardEdge == false）。
-  soft,
+  /// 容器或屏幕尺寸。
+  final Size size;
 
-  /// 棱角光刃：仅包含带刀锋/断崖/折光硬边的预设（hardEdge == true）。
-  sharp,
+  /// 宽高比（width / height）。
+  final double aspectRatio;
+
+  /// 上一次播放或过渡的地形预设索引。
+  final int lastPresetIndex;
+
+  /// 当前组件配置的边缘风格。
+  final MeshFlowEdgeStyle edgeStyle;
+
+  /// 全局地形预设列表。
+  final List<TerrainPreset> presets;
 }
+
+/// 自定义地形预设选择器回调函数。
+typedef MeshFlowPresetSelector = int Function(MeshFlowTerrainContext context);
 
 /// 流体动态网格背景组件。
 ///
@@ -37,6 +53,8 @@ class MeshFlow extends StatefulWidget {
     this.palette,
     this.presetIndex,
     this.edgeStyle = MeshFlowEdgeStyle.random,
+    this.adaptiveTerrain = true,
+    this.presetSelector,
     this.speed = 1.0,
     double? flowSpeed,
     this.animating = true,
@@ -72,6 +90,17 @@ class MeshFlow extends StatefulWidget {
 
   /// 地形分界边缘风格（随机交替 / 柔和弥散 / 棱角光刃）。
   final MeshFlowEdgeStyle edgeStyle;
+
+  /// 是否根据屏幕/容器尺寸自适应选择地形预设（默认 true）。
+  ///
+  /// - 横屏时自动避开 [TerrainSuitability.portraitOnly] 等会被封面遮挡的竖屏专用硬边；
+  /// - 竖屏时大幅提升针对移动端下半幅控件区优化的硬边抽取概率。
+  final bool adaptiveTerrain;
+
+  /// 自定义地形预设选择器回调。
+  ///
+  /// 若提供此项，在 [presetIndex] 为空时的地形选取将交由调用方全权接管。
+  final MeshFlowPresetSelector? presetSelector;
 
   /// 流动速度倍率。
   final double speed;
@@ -171,6 +200,7 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
         }
       });
 
+    _isInitialized = true;
     _loadCover();
   }
 
@@ -194,6 +224,8 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     }
 
     final bool edgeStyleChanged = widget.edgeStyle != oldWidget.edgeStyle;
+    final bool adaptiveChanged = widget.adaptiveTerrain != oldWidget.adaptiveTerrain ||
+        widget.presetSelector != oldWidget.presetSelector;
 
     final bool coverChanged = widget.coverKey != oldWidget.coverKey ||
         widget.image != oldWidget.image ||
@@ -202,6 +234,7 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
         !listEquals(widget.palette, oldWidget.palette) ||
         widget.presetIndex != oldWidget.presetIndex ||
         edgeStyleChanged ||
+        adaptiveChanged ||
         widget.textureSize != oldWidget.textureSize ||
         widget.saturation != oldWidget.saturation ||
         widget.contrast != oldWidget.contrast;
@@ -228,43 +261,49 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     }
   }
 
-  int _selectNextPreset() {
+  bool _isInitialized = false;
+  Size? _currentSize;
+
+  Size? get _effectiveSize {
+    if (_currentSize != null && _currentSize!.width > 0 && _currentSize!.height > 0) {
+      return _currentSize;
+    }
+    if (_isInitialized && mounted) {
+      return MediaQuery.maybeSizeOf(context);
+    }
+    return null;
+  }
+
+  int _selectNextPreset({Size? size}) {
     if (widget.presetIndex != null) {
       return widget.presetIndex!.clamp(0, kTerrainPresets.length - 1);
     }
-    final List<int> candidateIndices;
-    switch (widget.edgeStyle) {
-      case MeshFlowEdgeStyle.soft:
-        candidateIndices = [
-          for (int i = 0; i < kTerrainPresets.length; i++)
-            if (!kTerrainPresets[i].hardEdge) i,
-        ];
-        break;
-      case MeshFlowEdgeStyle.sharp:
-        candidateIndices = [
-          for (int i = 0; i < kTerrainPresets.length; i++)
-            if (kTerrainPresets[i].hardEdge) i,
-        ];
-        break;
-      case MeshFlowEdgeStyle.random:
-      default:
-        candidateIndices = [
-          for (int i = 0; i < kTerrainPresets.length; i++) i,
-        ];
-        break;
+
+    final effSize = size ?? _effectiveSize ?? const Size(400, 800);
+    final double ratio = effSize.height > 0 ? effSize.width / effSize.height : 1.0;
+
+    if (widget.presetSelector != null) {
+      final customIdx = widget.presetSelector!(
+        MeshFlowTerrainContext(
+          size: effSize,
+          aspectRatio: ratio,
+          lastPresetIndex: _lastPreset,
+          edgeStyle: widget.edgeStyle,
+          presets: kTerrainPresets,
+        ),
+      );
+      final safeIdx = customIdx.clamp(0, kTerrainPresets.length - 1);
+      _lastPreset = safeIdx;
+      return safeIdx;
     }
-    if (candidateIndices.isEmpty) {
-      return 0;
-    }
-    final int count = candidateIndices.length;
-    final random = math.Random();
-    int next = candidateIndices[random.nextInt(count)];
-    if (count > 1 && next == _lastPreset) {
-      final pool = candidateIndices.where((idx) => idx != _lastPreset).toList();
-      if (pool.isNotEmpty) {
-        next = pool[random.nextInt(pool.length)];
-      }
-    }
+
+    final next = WarpGrid.selectPresetIndex(
+      size: effSize,
+      aspectRatio: ratio,
+      edgeStyle: widget.edgeStyle,
+      adaptiveTerrain: widget.adaptiveTerrain,
+      lastPresetIndex: _lastPreset,
+    );
     _lastPreset = next;
     return next;
   }
@@ -357,7 +396,7 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
       return;
     }
 
-    final int nextPreset = _selectNextPreset();
+    final int nextPreset = _selectNextPreset(size: _effectiveSize);
 
     if (_currentTexture == null) {
       // 首次加载完成：直接上屏
@@ -477,6 +516,16 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
+        if (_currentSize == null && size.width > 0 && size.height > 0) {
+          _currentSize = size;
+          if (_currentTexture == null) {
+            final initialPreset = _selectNextPreset(size: size);
+            _fromTerrain = kTerrainPresets[initialPreset];
+            _toTerrain = kTerrainPresets[initialPreset];
+          }
+        } else {
+          _currentSize = size;
+        }
         final double progress = _fadeController.isAnimating ? _fadeAnimation.value : 1.0;
 
         ui.Vertices? vertices;

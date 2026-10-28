@@ -2,9 +2,42 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+/// 地形对屏幕/容器长宽比与 UI 布局的适用倾向。
+enum TerrainSuitability {
+  /// 全通用：横屏和竖屏下均具有良好的视觉平衡与构图。
+  any,
+
+  /// 竖屏优选：硬边针对移动端等纵向构图优化（如下半幅控制区、右下留白等），竖屏时适当增加抽取权重。
+  portraitPreferred,
+
+  /// 竖屏专用：硬边主要集中在左下或底部偏左。在横屏桌面端（通常左侧为大封面卡片）会被封面完全遮挡，
+  /// 横屏下应避开选择；在竖屏下视觉张力极强，作为核心硬边优先选择。
+  portraitOnly,
+
+  /// 横屏优选：针对横向大画幅优化，横屏时适当增加抽取权重。
+  landscapePreferred,
+}
+
+/// 动态流变边缘风格。
+enum MeshFlowEdgeStyle {
+  /// 随机交替：包含全部预设（平缓柔和与锐利折痕）。
+  random,
+
+  /// 柔和弥散：仅包含平缓山坡与大波澜预设（hardEdge == false）。
+  soft,
+
+  /// 棱角光刃：仅包含带刀锋/断崖/折光硬边的预设（hardEdge == true）。
+  sharp,
+}
+
 /// 地形预设参数，控制网格悬崖与驻波模态形态。
 class TerrainPreset {
-  const TerrainPreset({required this.p, required this.r, this.hardEdge = false});
+  const TerrainPreset({
+    required this.p,
+    required this.r,
+    this.hardEdge = false,
+    this.suitability = TerrainSuitability.any,
+  });
 
   /// 悬崖位置相位（6个浮点数），索引与 `r` 一一对应：
   ///
@@ -112,6 +145,9 @@ class TerrainPreset {
   /// 该标记不参与几何计算，仅用于对外描述地形风格，并由单元测试守住
   /// 「硬边多于柔和」的预设池配比。
   final bool hardEdge;
+
+  /// 地形对屏幕/容器长宽比与 UI 布局的适用倾向。
+  final TerrainSuitability suitability;
 }
 
 /// 精选的 30 组地形预设池，涵盖峭壁、光棱、峡谷、地平线与深海等不同风格，每次切歌随机抽取一组（避免连续重复）。
@@ -161,6 +197,7 @@ const List<TerrainPreset> kTerrainPresets = [
       -0.27, 0.78, -0.70, 0.00, 0.00, -0.61, -0.68, 0.49, -0.41, -0.18, -0.82, -0.79,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #5: 对角光棱（Diagonal Prism）- 对角刀锋折光边缘，贴图在折痕处被压成一条硬边
   TerrainPreset(
@@ -211,6 +248,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.81, 0.35, -0.70, 0.00, 0.00, -0.77, -0.77, 0.03, 0.36, -0.98, 0.19, -0.66,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #11: 潮汐横涌（Tidal Swell）- 横向长波缓缓推涌，颜色过渡柔软
   TerrainPreset(
@@ -256,6 +294,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.86, 0.25, 0.06, -0.93, -0.46, 0.56, 0.46, -0.52, 0.70, 0.71, -0.13, -0.01,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #17: 右中斜崖（Mid Right Fold）- 刀锋 u≈0.70 贯穿中段，纵向覆盖最完整的一组长刃
   TerrainPreset( // 右中硬边缘，适合移动端
@@ -264,6 +303,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.30, -0.29, -0.71, -0.65, -0.90, -0.78, -0.04, -0.63, -0.94, -0.05, -0.72, -0.80,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #18: 右岸垂帘（Right Curtain）- 刀锋 u≈0.77 从下半幅垂下，边缘贴着中右而不再贴边
   TerrainPreset(
@@ -280,6 +320,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.20, 0.35, -0.25, 0.00, 0.00, 0.40, 0.75, -0.30, 0.45, 0.20, -0.85, 0.15,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
 
   // #20: 下沉帷幕（Bottom Curtain Drift）- 纵横结合的重力下垂帷幕，在 v≈0.78 处铺展刀锋
@@ -289,6 +330,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.30, -0.40, 0.35, -0.55, -0.70, 0.45, 0.85, -0.50, 0.70, 0.35, -0.88, 0.25,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #21: 底座月弧（Base Crescent Ridge）- 下半幅呈微向上弯的月弧悬崖，v≈0.70~0.80 优美包裹底部
   // TerrainPreset( // 硬边缘在左边，由于音乐播放器基本上看不到所以去掉
@@ -306,6 +348,7 @@ const List<TerrainPreset> kTerrainPresets = [
       -0.50, 0.60, -0.65, 0.20, -0.75, 0.50, 0.55, 0.50, 0.50, -0.80, -0.85, -0.40,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitOnly,
   ),
   // #23: 右下折角（Bottom Right L-Notch）- 纵横双向交汇成锐折L型短角标，刚好像框一样包围右下角控制按键区
   TerrainPreset( // 下方边缘，适合移动端
@@ -314,6 +357,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.35, -0.30, 0.35, -0.70, -0.45, 0.40, 0.78, -0.25, 0.50, 0.30, -0.82, -0.20,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #24: 右下飞刃（Lower Right Steep Slash）- #22 的镜像姊妹款，约45°陡斜光棱斜穿右下半区（x≈0.50~0.88, y≈0.58~0.75），左半区完全柔和
   TerrainPreset( // 适合移动端
@@ -322,6 +366,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.50, 0.40, -0.42, 0.20, 0.75, 0.50, 0.55, -0.50, -0.55, 0.80, -0.85, -0.40,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #25: 下幅长虹（Lower Wide Horizon Arc）- 横贯下半幅中段（x≈0.16~0.72, y≈0.64~0.74）的宽幅微弧长刃，在居中封面与底部控件区之间拉出舒展分界
     // 由于硬边缘在左侧，会被封面挡住，不适合桌面端
@@ -331,6 +376,7 @@ const List<TerrainPreset> kTerrainPresets = [
       -0.25, 0.25, -0.20, 0.10, -0.25, 0.90, 0.85, -0.05, 0.88, -0.75, -0.96, -0.50,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitOnly,
   ),
   // #26: 左下深谷（Lower Left Deep Valley）- 比 #22 更靠底（x≈0.14~0.56, y≈0.64~0.82），刀锋沉入左下播放控制栏与歌词区后方
     // 由于硬边缘在左侧，会被封面挡住，不适合桌面端
@@ -340,6 +386,7 @@ const List<TerrainPreset> kTerrainPresets = [
       -0.48, 0.30, -0.30, 0.20, -0.78, 0.68, 0.58, 0.45, 0.58, -0.80, -0.90, -0.45,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitOnly,
   ),
   // #27: 右下深谷（Lower Right Deep Valley）- 压在右下半幅深处（x≈0.44~0.86, y≈0.64~0.82），从底部中央向右上扬起长弧托住右下控件区
   TerrainPreset(  // 适合移动端
@@ -348,6 +395,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.48, 0.36, -0.36, 0.20, 0.78, 0.68, 0.58, -0.45, -0.58, 0.80, -0.90, -0.45,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
   // #28: 左下宽斩（Lower Left Broad Slash）- 倾角比 #22 更舒展、横向跨度更宽（x≈0.14~0.64, y≈0.62~0.78），从左腰一路斜贯过中线
     // 由于硬边缘在左侧，会被封面挡住，不适合桌面端
@@ -357,6 +405,7 @@ const List<TerrainPreset> kTerrainPresets = [
       -0.40, 0.34, -0.32, 0.18, -0.82, 0.66, 0.64, 0.20, 0.68, -0.82, -0.90, -0.45,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitOnly,
   ),
   // #29: 右下宽斩（Lower Right Broad Slash）- 倾角舒展、横向跨度更宽（x≈0.36~0.86, y≈0.62~0.78），从底部中左一路逆斜延伸至右腰
   TerrainPreset(  // 适合移动端
@@ -365,6 +414,7 @@ const List<TerrainPreset> kTerrainPresets = [
       0.40, 0.34, -0.32, 0.18, 0.82, 0.66, 0.64, -0.20, -0.68, 0.82, -0.90, -0.45,
     ],
     hardEdge: true,
+    suitability: TerrainSuitability.portraitPreferred,
   ),
 ];
 
@@ -615,5 +665,121 @@ class WarpGrid {
       textureCoordinates: texCoords,
       indices: _staticIndices,
     );
+  }
+
+  /// 根据尺寸/宽高比、边缘风格和自适应偏好加权选择下一个推荐的地形预设索引。
+  ///
+  /// - 当 [adaptiveTerrain] 为 true 时：
+  ///   - 横屏（`aspectRatio > 1.15`）：自动排除 [TerrainSuitability.portraitOnly] 预设（如左侧硬边容易被桌面端封面挡住的地形）；
+  ///   - 竖屏（`aspectRatio < 0.85`）：大幅提高 [TerrainSuitability.portraitOnly]（3.0x）与 [TerrainSuitability.portraitPreferred]（2.0x）的抽取权重；
+  ///   - 中立比例（`0.85 <= aspectRatio <= 1.15`）：全候选预设等权重抽取。
+  /// - 当 [lastPresetIndex] 存在且候选数量充足时，尽量避免连续抽到相同预设。
+  static int selectPresetIndex({
+    ui.Size? size,
+    double? aspectRatio,
+    MeshFlowEdgeStyle edgeStyle = MeshFlowEdgeStyle.random,
+    bool adaptiveTerrain = true,
+    int? lastPresetIndex,
+    math.Random? random,
+  }) {
+    final double ratio;
+    if (aspectRatio != null && aspectRatio > 0) {
+      ratio = aspectRatio;
+    } else if (size != null && size.height > 0) {
+      ratio = size.width / size.height;
+    } else {
+      ratio = 1.0;
+    }
+
+    final List<int> candidates = [];
+    for (int i = 0; i < kTerrainPresets.length; i++) {
+      final p = kTerrainPresets[i];
+      switch (edgeStyle) {
+        case MeshFlowEdgeStyle.soft:
+          if (!p.hardEdge) candidates.add(i);
+          break;
+        case MeshFlowEdgeStyle.sharp:
+          if (p.hardEdge) candidates.add(i);
+          break;
+        case MeshFlowEdgeStyle.random:
+          candidates.add(i);
+          break;
+      }
+    }
+
+    if (candidates.isEmpty) return 0;
+
+    final bool isLandscape = adaptiveTerrain && ratio > 1.15;
+    final bool isPortrait = adaptiveTerrain && ratio < 0.85;
+
+    final List<double> weights = [];
+    for (final idx in candidates) {
+      final preset = kTerrainPresets[idx];
+      double w = 1.0;
+      if (isLandscape) {
+        if (preset.suitability == TerrainSuitability.portraitOnly) {
+          w = 0.0; // 横屏完全避开竖屏专用硬边缘
+        } else if (preset.suitability == TerrainSuitability.landscapePreferred) {
+          w = 2.0;
+        }
+      } else if (isPortrait) {
+        if (preset.suitability == TerrainSuitability.portraitOnly) {
+          w = 3.0; // 竖屏专用硬边缘加权
+        } else if (preset.suitability == TerrainSuitability.portraitPreferred) {
+          w = 2.0; // 竖屏优选硬边缘加权
+        } else if (preset.suitability == TerrainSuitability.landscapePreferred) {
+          w = 0.5;
+        }
+      }
+      weights.add(w);
+    }
+
+    final List<int> validPool = [];
+    final List<double> validWeights = [];
+    for (int i = 0; i < candidates.length; i++) {
+      if (weights[i] > 0.0) {
+        validPool.add(candidates[i]);
+        validWeights.add(weights[i]);
+      }
+    }
+
+    final List<int> pool = validPool.isNotEmpty ? validPool : candidates;
+    final List<double> poolWeights = validPool.isNotEmpty
+        ? validWeights
+        : List<double>.filled(candidates.length, 1.0);
+
+    final rng = random ?? math.Random();
+
+    int pick(List<int> p, List<double> w) {
+      final double total = w.fold(0.0, (a, b) => a + b);
+      if (total <= 0.0) {
+        return p[rng.nextInt(p.length)];
+      }
+      double r = rng.nextDouble() * total;
+      for (int i = 0; i < p.length; i++) {
+        r -= w[i];
+        if (r <= 0.0) return p[i];
+      }
+      return p.last;
+    }
+
+    int next = pick(pool, poolWeights);
+
+    // 尽量避免连续抽到相同预设
+    if (pool.length > 1 && next == lastPresetIndex) {
+      final nonRepeatPool = <int>[];
+      final nonRepeatWeights = <double>[];
+      for (int i = 0; i < pool.length; i++) {
+        if (pool[i] != lastPresetIndex) {
+          nonRepeatPool.add(pool[i]);
+          nonRepeatWeights.add(poolWeights[i]);
+        }
+      }
+      if (nonRepeatPool.isNotEmpty) {
+        next = pick(nonRepeatPool, nonRepeatWeights);
+      }
+    }
+
+    return next;
   }
 }
