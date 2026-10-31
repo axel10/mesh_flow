@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_flow/mesh_flow.dart';
 
@@ -321,4 +322,46 @@ void main() {
     expect(capturedContext!.aspectRatio, closeTo(2.0, 0.05));
     expect(find.byType(MeshFlow), findsOneWidget);
   });
+
+  testWidgets('网格动画确实逐帧上屏（repaint 驱动而非 setState）', (tester) async {
+    // 防止有人把逐帧重绘改回 setState 或者漏接 CustomPainter.repaint：
+    // 那样画面会停在第一帧，这个断言会挂掉。
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: RepaintBoundary(
+            child: MeshFlow(presetIndex: 22, child: SizedBox.expand()),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    final before = await _capture(tester);
+
+    for (int i = 0; i < 20; ++i) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final after = await _capture(tester);
+
+    int changed = 0;
+    for (int i = 0; i < before.length; ++i) {
+      if (before[i] != after[i]) changed++;
+    }
+    expect(changed, greaterThan(before.length ~/ 10), reason: '画面在 320ms 内几乎没变');
+  });
+}
+
+/// 截取当前画面的原始像素。
+Future<Uint8List> _capture(WidgetTester tester) async {
+  final boundary = tester.renderObject<RenderRepaintBoundary>(
+    find.byType(RepaintBoundary).first,
+  );
+  late Uint8List bytes;
+  await tester.runAsync(() async {
+    final image = await boundary.toImage();
+    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    bytes = data!.buffer.asUint8List();
+    image.dispose();
+  });
+  return bytes;
 }

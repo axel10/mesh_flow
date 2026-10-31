@@ -153,6 +153,13 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
   double _time = 0.0;
   Duration _lastElapsed = Duration.zero;
 
+  /// 逐帧重绘信号。
+  ///
+  /// 网格每帧都在变，但变化的只有「画什么」，没有「摆哪」——因此用 [CustomPainter.repaint]
+  /// 驱动重绘，而不是每帧 `setState`：后者会让整个 widget 子树重建 + 重新布局，
+  /// 并把这个 Stack 里的歌词、控件一并拖进重绘。
+  final ValueNotifier<int> _repaintTick = ValueNotifier<int>(0);
+
   ui.Image? _currentTexture;
   ui.Image? _previousTexture;
 
@@ -168,6 +175,11 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
 
   late final AnimationController _fadeController;
   late final CurvedAnimation _fadeAnimation;
+
+  void _requestRepaint() {
+    if (!mounted) return;
+    _repaintTick.value++;
+  }
 
   @override
   void initState() {
@@ -189,14 +201,14 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     _fadeAnimation = CurvedAnimation(
       parent: _fadeController,
       curve: Curves.easeInOutCubic,
-    )..addListener(() {
-        if (mounted) setState(() {});
-      })..addStatusListener((status) {
+    )
+      ..addListener(_requestRepaint)
+      ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
           _previousTexture?.dispose();
           _previousTexture = null;
           _fromTerrain = _toTerrain;
-          if (mounted) setState(() {});
+          _requestRepaint();
         }
       });
 
@@ -255,9 +267,8 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     _lastElapsed = elapsed;
 
     if (dt > 0.0) {
-      setState(() {
-        _time += dt * widget.effectiveSpeed;
-      });
+      _time += dt * widget.effectiveSpeed;
+      _requestRepaint();
     }
   }
 
@@ -400,12 +411,11 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
 
     if (_currentTexture == null) {
       // 首次加载完成：直接上屏
-      setState(() {
-        _currentTexture = newTexture;
-        _toTerrain = kTerrainPresets[nextPreset];
-        _fromTerrain = _toTerrain;
-        _cachedVertices = null;
-      });
+      _currentTexture = newTexture;
+      _toTerrain = kTerrainPresets[nextPreset];
+      _fromTerrain = _toTerrain;
+      _cachedVertices = null;
+      _requestRepaint();
       return;
     }
 
@@ -502,12 +512,31 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
     return _cachedVertices!;
   }
 
+  /// 每次重绘时现取一帧数据：时间、过渡进度、纹理都读当前值，
+  /// 因此逐帧变化不需要走 widget 重建。
+  MeshFlowFrame _buildFrame(Size size) {
+    final double progress = _fadeController.isAnimating ? _fadeAnimation.value : 1.0;
+    final bool hasArea = size.width > 0 && size.height > 0;
+    return MeshFlowFrame(
+      vertices: hasArea && _currentTexture != null
+          ? _getOrBuildVertices(size, progress)
+          : null,
+      texture: _currentTexture,
+      previousTexture: _previousTexture,
+      transitionProgress: progress,
+      time: _time,
+      vignetteAlpha: widget.effectiveVignette,
+      fallbackColor: widget.fallbackColor,
+    );
+  }
+
   @override
   void dispose() {
     _ticker.dispose();
     _fadeController.dispose();
     _currentTexture?.dispose();
     _previousTexture?.dispose();
+    _repaintTick.dispose();
     super.dispose();
   }
 
@@ -526,37 +555,32 @@ class _MeshFlowState extends State<MeshFlow> with TickerProviderStateMixin {
         } else {
           _currentSize = size;
         }
-        final double progress = _fadeController.isAnimating ? _fadeAnimation.value : 1.0;
-
-        ui.Vertices? vertices;
-        if (size.width > 0 && size.height > 0 && _currentTexture != null) {
-          vertices = _getOrBuildVertices(size, progress);
-        }
 
         final content = CustomPaint(
           size: Size.infinite,
+          // 网格每帧都在变，别让引擎去尝试光栅缓存。
+          willChange: widget.animating,
           painter: MeshFlowPainter(
-            vertices: vertices,
-            texture: _currentTexture,
-            previousTexture: _previousTexture,
-            transitionProgress: progress,
-            time: _time,
-            vignetteAlpha: widget.effectiveVignette,
-            fallbackColor: widget.fallbackColor,
+            repaint: _repaintTick,
+            frameBuilder: _buildFrame,
           ),
         );
+
+        // 背景每帧重绘，必须与上层内容隔离：否则同一个 Stack 里的歌词、封面、
+        // 播放控件会被带动一起重绘。
+        final background = RepaintBoundary(child: content);
 
         if (widget.child != null) {
           return Stack(
             fit: StackFit.expand,
             children: [
-              content,
+              background,
               widget.child!,
             ],
           );
         }
 
-        return content;
+        return background;
       },
     );
   }

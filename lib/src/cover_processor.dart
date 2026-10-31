@@ -20,23 +20,34 @@ class CoverProcessor {
     double saturation = 2.6,
     double contrast = 1.4,
   }) async {
-    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-    final descriptor = await ui.ImageDescriptor.encoded(buffer);
-    final codec = await descriptor.instantiateCodec(
+    final codec = await ui.instantiateImageCodec(
+      bytes,
       targetWidth: targetSize,
       targetHeight: targetSize,
     );
-    final frame = await codec.getNextFrame();
-    final ui.Image rawImg = frame.image;
-    return processUiImage(
-      rawImg,
-      targetSize: targetSize,
-      saturation: saturation,
-      contrast: contrast,
-    );
+    try {
+      final frame = await codec.getNextFrame();
+      final rawImg = frame.image;
+      try {
+        return await processUiImage(
+          rawImg,
+          targetSize: targetSize,
+          saturation: saturation,
+          contrast: contrast,
+        );
+      } finally {
+        // 解码出来的原始帧只在本函数内使用，必须显式释放，
+        // 否则每换一首歌都会留一张 GPU 纹理等 GC。
+        rawImg.dispose();
+      }
+    } finally {
+      codec.dispose();
+    }
   }
 
   /// 从 [ui.Image]（任意尺寸）处理为平滑流体纹理。
+  ///
+  /// [image] 的所有权仍归调用方，本方法不会释放它。
   static Future<ui.Image> processUiImage(
     ui.Image image, {
     int targetSize = defaultTargetSize,
@@ -44,6 +55,7 @@ class CoverProcessor {
     double contrast = 1.4,
   }) async {
     ui.Image imgScaled = image;
+    bool ownsScaled = false;
     if (image.width != targetSize || image.height != targetSize) {
       final recorder = ui.PictureRecorder();
       final canvas = ui.Canvas(recorder);
@@ -56,31 +68,41 @@ class CoverProcessor {
       );
       final picture = recorder.endRecording();
       imgScaled = await picture.toImage(targetSize, targetSize);
+      picture.dispose();
+      ownsScaled = true;
     }
 
-    final byteData = await imgScaled.toByteData(format: ui.ImageByteFormat.rawRgba);
-    if (byteData == null) {
-      return imgScaled;
+    try {
+      final byteData = await imgScaled.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (byteData == null) {
+        // 读不回来就退化为原图，所有权转交给调用方
+        ownsScaled = false;
+        return imgScaled;
+      }
+
+      final Uint8List pixels = Uint8List.fromList(byteData.buffer.asUint8List());
+      _applyColorTuningAndBlur(
+        pixels,
+        targetSize,
+        targetSize,
+        saturation: saturation,
+        contrast: contrast,
+      );
+
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromPixels(
+        pixels,
+        targetSize,
+        targetSize,
+        ui.PixelFormat.rgba8888,
+        completer.complete,
+      );
+      return completer.future;
+    } finally {
+      if (ownsScaled) {
+        imgScaled.dispose();
+      }
     }
-
-    final Uint8List pixels = Uint8List.fromList(byteData.buffer.asUint8List());
-    _applyColorTuningAndBlur(
-      pixels,
-      targetSize,
-      targetSize,
-      saturation: saturation,
-      contrast: contrast,
-    );
-
-    final completer = Completer<ui.Image>();
-    ui.decodeImageFromPixels(
-      pixels,
-      targetSize,
-      targetSize,
-      ui.PixelFormat.rgba8888,
-      completer.complete,
-    );
-    return completer.future;
   }
 
   /// 从 Flutter 的 [ImageProvider] 异步解析并处理封面。
@@ -144,7 +166,12 @@ class CoverProcessor {
     canvas.drawRect(rect, ui.Paint()..shader = gradient);
     final picture = recorder.endRecording();
     final img = await picture.toImage(targetSize, targetSize);
-    return processUiImage(img, targetSize: targetSize);
+    picture.dispose();
+    try {
+      return await processUiImage(img, targetSize: targetSize);
+    } finally {
+      img.dispose();
+    }
   }
 
   /// 生成单色降级微型纹理（用于无封面时的备选）。
